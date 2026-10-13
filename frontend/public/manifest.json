@@ -1,0 +1,23 @@
+{
+  "name": "ArecaSmart Advisor",
+  "short_name": "ArecaSmart",
+  "description": "Smart agronomic advisory platform for areca nut farmers",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#047857",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/628/628325.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/628/628325.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
