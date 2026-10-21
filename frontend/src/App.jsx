@@ -1,10 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
-import { Camera, MapPin, Sprout, Bell, CloudRain, CheckCircle, AlertTriangle, RefreshCw } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bell,
+  Camera,
+  CheckCircle,
+  CloudRain,
+  MapPin,
+  RefreshCw,
+  Sprout,
+} from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import './App.css';
 
-// Fix default Leaflet marker icon issue in Vite builds
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -16,19 +25,54 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-// Component to handle map click events for pinning location
+const routePaths = {
+  login: '/login',
+  setup: '/farm-setup',
+  dashboard: '/dashboard',
+};
+
+function getRoute(pathname) {
+  return Object.keys(routePaths).find((route) => routePaths[route] === pathname) ?? 'login';
+}
+
 function LocationPicker({ position, setPosition }) {
   useMapEvents({
-    click(e) {
-      setPosition([e.latlng.lat, e.latlng.lng]);
+    click(event) {
+      setPosition([event.latlng.lat, event.latlng.lng]);
     },
   });
-  return position === null ? null : <Marker position={position}></Marker>;
+
+  return position === null ? null : <Marker position={position} />;
+}
+
+function BottomNavigation({ activeRoute, navigate }) {
+  return (
+    <nav className="bottom-navigation" aria-label="Main navigation">
+      <button
+        type="button"
+        onClick={() => navigate('dashboard')}
+        className={`nav-item ${activeRoute === 'dashboard' ? 'is-active' : ''}`}
+        aria-current={activeRoute === 'dashboard' ? 'page' : undefined}
+      >
+        <Bell aria-hidden="true" />
+        <span>Dashboard</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => navigate('setup')}
+        className={`nav-item ${activeRoute === 'setup' ? 'is-active' : ''}`}
+        aria-current={activeRoute === 'setup' ? 'page' : undefined}
+      >
+        <MapPin aria-hidden="true" />
+        <span>Farm setup</span>
+      </button>
+    </nav>
+  );
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [position, setPosition] = useState([13.3161, 75.7720]); // Default to central Areca nut belt (Shivamogga/Karnataka region)
+  const [activeRoute, setActiveRoute] = useState(() => getRoute(window.location.pathname));
+  const [position, setPosition] = useState([13.3161, 75.772]);
   const [growthStage, setGrowthStage] = useState('Juvenile Palm');
   const [capturedImage, setCapturedImage] = useState(null);
   const [backendStatus, setBackendStatus] = useState('Checking...');
@@ -36,13 +80,22 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches
+    () => window.matchMedia('(display-mode: standalone)').matches,
   );
 
-  // Check connection to FastAPI backend
+  useEffect(() => {
+    if (window.location.pathname !== routePaths[activeRoute]) {
+      window.history.replaceState({}, '', routePaths[activeRoute]);
+    }
+
+    const handlePopState = () => setActiveRoute(getRoute(window.location.pathname));
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeRoute]);
+
   useEffect(() => {
     fetch('http://localhost:8000/api/health')
-      .then((res) => res.json())
+      .then((response) => response.json())
       .then((data) => setBackendStatus(data.status))
       .catch(() => setBackendStatus('Offline (Mock Mode active)'));
   }, []);
@@ -54,51 +107,50 @@ export default function App() {
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
+
+  const navigate = (route) => {
+    if (!routePaths[route] || route === activeRoute) return;
+    window.history.pushState({}, '', routePaths[route]);
+    setActiveRoute(route);
+    window.scrollTo(0, 0);
+  };
 
   const handleInstallClick = async () => {
     if (!installPrompt) return;
 
     await installPrompt.prompt();
     const { outcome } = await installPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setIsInstalled(true);
-    }
+    if (outcome === 'accepted') setIsInstalled(true);
     setInstallPrompt(null);
   };
 
-// Real API Call to FastAPI Backend
   const handleRunAnalysis = async () => {
     setLoading(true);
     try {
       const response = await fetch('http://localhost:8000/api/analyze', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           latitude: position[0],
           longitude: position[1],
-          growth_stage: growthStage
+          growth_stage: growthStage,
         }),
       });
 
       const result = await response.json();
       if (result.success) {
         setFeedbacks([result.data.recommendations]);
+        navigate('dashboard');
       } else {
         alert('Failed to generate advisory from backend.');
       }
-    } catch (err) {
-      console.error('Error connecting to backend:', err);
+    } catch (error) {
+      console.error('Error connecting to backend:', error);
       alert('Could not reach FastAPI backend. Make sure uvicorn is running on port 8000.');
     } finally {
       setLoading(false);
-      setActiveTab('dashboard');
     }
   };
 
@@ -106,224 +158,243 @@ export default function App() {
     'Seedling / Nursery',
     'Juvenile Palm',
     'Pre-Bearing',
-    'Bearing / Full Production'
+    'Bearing / Full Production',
   ];
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-50 text-slate-800 font-sans max-w-md mx-auto shadow-2xl border-x border-slate-200">
-      
-      {/* Top Header */}
-      <header className="bg-emerald-700 text-white p-4 sticky top-0 z-50 shadow-md flex justify-between items-center">
-        <div>
-          <h1 className="font-bold text-lg flex items-center gap-2">
-            <Sprout className="w-5 h-5 text-emerald-300" /> ArecaSmart Advisor
-          </h1>
-          <p className="text-xs text-emerald-100">Backend: <span className="underline font-mono">{backendStatus}</span></p>
-        </div>
-        <div className="bg-emerald-800 px-2.5 py-1 rounded-full text-xs font-medium text-emerald-200 border border-emerald-600">
-          PWA Active
+    <div className="app-shell">
+      <header className="top-bar">
+        <a
+          className="brand"
+          href={routePaths.dashboard}
+          onClick={(event) => {
+            event.preventDefault();
+            navigate(activeRoute === 'login' ? 'login' : 'dashboard');
+          }}
+        >
+          <span className="brand-mark"><Sprout aria-hidden="true" /></span>
+          <span className="brand-copy">
+            <strong>ArecaSmart</strong>
+            <span>Farm advisor</span>
+          </span>
+        </a>
+
+        {activeRoute !== 'login' && (
+          <nav className="desktop-navigation" aria-label="Main navigation">
+            <button
+              type="button"
+              onClick={() => navigate('dashboard')}
+              className={activeRoute === 'dashboard' ? 'is-active' : ''}
+            >
+              Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('setup')}
+              className={activeRoute === 'setup' ? 'is-active' : ''}
+            >
+              Farm setup
+            </button>
+          </nav>
+        )}
+
+        <div className="connection-status">
+          <span className="status-dot" />
+          <span className="status-label">{backendStatus}</span>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 p-4 pb-20 overflow-y-auto">
-        
-        {/* TAB 1: DASHBOARD FEED */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-4">
-            {installPrompt && !isInstalled && (
-              <div className="bg-emerald-800 text-white px-4 py-2.5 flex justify-between items-center text-xs shadow-inner border-b border-emerald-600">
-                <span>📱 Install ArecaSmart on your home screen for quick access!</span>
-                <button
-                  onClick={handleInstallClick}
-                  className="bg-white text-emerald-800 font-bold px-3 py-1 rounded shadow hover:bg-emerald-50 transition"
-                >
-                  Install App
-                </button>
-              </div>
-            )}
-
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <h2 className="font-semibold text-slate-700 mb-2 flex items-center gap-2 text-sm">
-                <MapPin className="w-4 h-4 text-emerald-600" /> Active Farmland Coordinates
-              </h2>
-              <div className="text-xs font-mono bg-slate-100 p-2 rounded text-slate-600 mb-3">
-                Lat: {position[0].toFixed(4)}, Lng: {position[1].toFixed(4)}
-              </div>
-              <div className="flex justify-between items-center text-xs text-slate-500">
-                <span>Stage: <strong className="text-emerald-700">{growthStage}</strong></span>
-                <button 
-                  onClick={() => setActiveTab('setup')} 
-                  className="text-emerald-600 font-semibold hover:underline"
-                >
-                  Change Field/Stage
-                </button>
-              </div>
-            </div>
-
-            {/* Dynamic Feedback Cards */}
-            <h3 className="font-bold text-slate-800 text-sm tracking-wide uppercase mt-4">Agronomic Action Feed</h3>
-
-            {feedbacks.length === 0 ? (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-center">
-                <CloudRain className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
-                <h4 className="font-semibold text-emerald-800 text-sm">No analysis generated yet</h4>
-                <p className="text-xs text-emerald-600 mt-1 mb-4">Configure your stage and pin your farm to fetch tailored default rule responses.</p>
-                <button 
-                  onClick={() => setActiveTab('setup')}
-                  className="bg-emerald-600 text-white text-xs font-medium px-4 py-2 rounded-lg shadow hover:bg-emerald-700"
-                >
-                  Setup Farm & Generate
-                </button>
-              </div>
-            ) : (
-              feedbacks.map((fb, idx) => (
-                <div key={idx} className="space-y-3">
-                  {/* Fertilization Card */}
-                  <div className="bg-white border-l-4 border-amber-500 p-4 rounded-r-xl shadow-sm space-y-1">
-                    <div className="flex items-center gap-2 text-amber-700 font-semibold text-xs uppercase">
-                      <CheckCircle className="w-4 h-4" /> Fertilization Prescription
-                    </div>
-                    <p className="text-sm text-slate-700">{fb.fertilizer}</p>
-                  </div>
-
-                  {/* Irrigation Card */}
-                  <div className="bg-white border-l-4 border-blue-500 p-4 rounded-r-xl shadow-sm space-y-1">
-                    <div className="flex items-center gap-2 text-blue-700 font-semibold text-xs uppercase">
-                      <CloudRain className="w-4 h-4" /> Irrigation Recommendation
-                    </div>
-                    <p className="text-sm text-slate-700">{fb.irrigation}</p>
-                  </div>
-
-                  {/* Alert Card */}
-                  <div className="bg-white border-l-4 border-rose-500 p-4 rounded-r-xl shadow-sm space-y-1">
-                    <div className="flex items-center gap-2 text-rose-700 font-semibold text-xs uppercase">
-                      <AlertTriangle className="w-4 h-4" /> Environmental & Health Alert
-                    </div>
-                    <p className="text-sm text-slate-700">{fb.alert}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+      <main className={`page-content ${activeRoute === 'login' ? 'login-page' : ''}`}>
+        {activeRoute === 'login' && (
+          <section className="login-card" aria-labelledby="login-title">
+            <div className="login-icon"><Sprout aria-hidden="true" /></div>
+            <p className="eyebrow">Welcome to ArecaSmart</p>
+            <h1 id="login-title">Your farm, at a glance.</h1>
+            <p className="login-description">
+              Sign in to manage your areca nut farm and get timely, field-specific guidance.
+            </p>
+            <form
+              className="login-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                navigate('setup');
+              }}
+            >
+              <label htmlFor="email">Email address</label>
+              <input id="email" name="email" type="email" autoComplete="email" required />
+              <label htmlFor="password">Password</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+              />
+              <button type="submit" className="primary-button">Continue to farm setup</button>
+            </form>
+            <p className="prototype-note">Account authentication can be connected to your service.</p>
+          </section>
         )}
 
-        {/* TAB 2: FIELD SETUP & MAP PINNING */}
-        {activeTab === 'setup' && (
-          <div className="space-y-4">
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3">
-              <h2 className="font-semibold text-slate-800 text-sm">1. Select Growth Stage</h2>
-              <select 
-                value={growthStage} 
-                onChange={(e) => setGrowthStage(e.target.value)}
-                className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
-              >
-                {stages.map((st) => (
-                  <option key={st} value={st}>{st}</option>
-                ))}
-              </select>
+        {activeRoute === 'setup' && (
+          <section className="view-section" aria-labelledby="setup-title">
+            <div className="page-heading">
+              <p className="eyebrow">Your farm profile</p>
+              <h1 id="setup-title">Farm setup &amp; map</h1>
+              <p>Choose your crop stage and pin the location of your field.</p>
             </div>
 
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-2">
-              <h2 className="font-semibold text-slate-800 text-sm flex items-center justify-between">
-                <span>2. Pin Field Location</span>
-                <span className="text-xs font-normal text-slate-500">Tap map to move pin</span>
-              </h2>
-              
-              {/* Leaflet Map Container */}
-              <div className="h-64 w-full rounded-lg overflow-hidden border border-slate-200 z-0 relative">
-                <MapContainer center={position} zoom={13} scrollWheelZoom={false} style={{ height: '100%', width: '100%' }}>
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  <LocationPicker position={position} setPosition={setPosition} />
-                </MapContainer>
-              </div>
+            <div className="setup-grid">
+              <section className="content-card stage-card">
+                <div className="step-heading">
+                  <span className="step-number">1</span>
+                  <div>
+                    <h2>Growth stage</h2>
+                    <p>Choose the stage that best describes your palms.</p>
+                  </div>
+                </div>
+                <label className="field-label" htmlFor="growth-stage">Crop stage</label>
+                <select
+                  id="growth-stage"
+                  value={growthStage}
+                  onChange={(event) => setGrowthStage(event.target.value)}
+                >
+                  {stages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+                </select>
+              </section>
+
+              <section className="content-card map-card">
+                <div className="step-heading">
+                  <span className="step-number">2</span>
+                  <div>
+                    <h2>Field location</h2>
+                    <p>Tap the map to move the pin to your farm.</p>
+                  </div>
+                </div>
+                <div className="map-frame">
+                  <MapContainer center={position} zoom={13} scrollWheelZoom={false}>
+                    <TileLayer
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                    <LocationPicker position={position} setPosition={setPosition} />
+                  </MapContainer>
+                </div>
+                <p className="coordinates">
+                  <MapPin aria-hidden="true" />
+                  {position[0].toFixed(4)}, {position[1].toFixed(4)}
+                </p>
+              </section>
             </div>
 
             <button
+              type="button"
               onClick={handleRunAnalysis}
               disabled={loading}
-              className="w-full bg-emerald-600 text-white font-medium py-3 rounded-xl shadow hover:bg-emerald-700 transition flex items-center justify-center gap-2 text-sm"
+              className="primary-button analysis-button"
             >
-              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sprout className="w-4 h-4" />}
-              {loading ? 'Processing Default Rules...' : 'Save Field & Fetch Insights'}
+              {loading ? <RefreshCw className="spinning" aria-hidden="true" /> : <Sprout aria-hidden="true" />}
+              {loading ? 'Generating your insights...' : 'Save farm & generate insights'}
             </button>
-          </div>
+          </section>
         )}
 
-        {/* TAB 3: CAMERA UPLOAD */}
-        {activeTab === 'camera' && (
-          <div className="space-y-4">
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 text-center space-y-3">
-              <h2 className="font-semibold text-slate-800 text-sm text-left">Upload Crop or Leaf Photo</h2>
-              <p className="text-xs text-slate-500 text-left">Snap a picture of your areca nut canopy or leaf structure to record visual growth milestones.</p>
-              
-              <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 relative">
-                {capturedImage ? (
-                  <img src={capturedImage} alt="Captured crop" className="max-h-48 rounded-lg object-cover shadow" />
-                ) : (
-                  <>
-                    <Camera className="w-12 h-12 text-slate-400 mb-2" />
-                    <span className="text-xs text-slate-600 font-medium">No photo selected</span>
-                  </>
-                )}
-                
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  capture="environment" 
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files[0]) {
-                      setCapturedImage(URL.createObjectURL(e.target.files[0]));
-                    }
-                  }}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                />
+        {activeRoute === 'dashboard' && (
+          <section className="view-section" aria-labelledby="dashboard-title">
+            <div className="page-heading dashboard-heading">
+              <div>
+                <p className="eyebrow">Your growing season</p>
+                <h1 id="dashboard-title">Farm dashboard</h1>
+                <p>Practical guidance for your areca nut farm.</p>
               </div>
-
-              <p className="text-xs text-emerald-600 font-medium">Tap box above to open phone camera or select file.</p>
-
-              {capturedImage && (
-                <button 
-                  onClick={() => {
-                    alert('Photo uploaded successfully to local session storage!');
-                    setActiveTab('dashboard');
-                  }}
-                  className="w-full bg-emerald-600 text-white py-2.5 rounded-lg text-sm font-medium shadow hover:bg-emerald-700"
-                >
-                  Confirm & Upload Image
-                </button>
-              )}
+              <button type="button" className="secondary-button" onClick={() => navigate('setup')}>
+                <MapPin aria-hidden="true" /> Edit farm
+              </button>
             </div>
-          </div>
-        )}
 
+            {installPrompt && !isInstalled && (
+              <aside className="install-banner">
+                <span>Install ArecaSmart on your home screen for quick access.</span>
+                <button type="button" onClick={handleInstallClick}>Install app</button>
+              </aside>
+            )}
+
+            <section className="content-card farm-summary">
+              <div className="summary-icon"><MapPin aria-hidden="true" /></div>
+              <div className="summary-details">
+                <h2>Active farmland</h2>
+                <p>{position[0].toFixed(4)}, {position[1].toFixed(4)}</p>
+              </div>
+              <div className="stage-badge">{growthStage}</div>
+            </section>
+
+            <div className="section-title">
+              <div>
+                <p className="eyebrow">Farm recommendations</p>
+                <h2>Agronomic action feed</h2>
+              </div>
+              <Sprout aria-hidden="true" />
+            </div>
+
+            {feedbacks.length === 0 ? (
+              <section className="empty-state">
+                <div className="empty-icon"><CloudRain aria-hidden="true" /></div>
+                <h3>Your insights are on the way</h3>
+                <p>Set up your field location and crop stage to generate tailored farm recommendations.</p>
+                <button type="button" className="primary-button" onClick={() => navigate('setup')}>
+                  Set up your farm
+                </button>
+              </section>
+            ) : (
+              <div className="recommendation-list">
+                {feedbacks.map((feedback, index) => (
+                  <div className="recommendation-group" key={index}>
+                    <article className="recommendation-card fertilizer-card">
+                      <div><CheckCircle aria-hidden="true" /><h3>Fertilization</h3></div>
+                      <p>{feedback.fertilizer}</p>
+                    </article>
+                    <article className="recommendation-card irrigation-card">
+                      <div><CloudRain aria-hidden="true" /><h3>Irrigation</h3></div>
+                      <p>{feedback.irrigation}</p>
+                    </article>
+                    <article className="recommendation-card alert-card">
+                      <div><AlertTriangle aria-hidden="true" /><h3>Environmental &amp; health alert</h3></div>
+                      <p>{feedback.alert}</p>
+                    </article>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <section className="content-card photo-card">
+              <div className="photo-copy">
+                <div className="photo-icon"><Camera aria-hidden="true" /></div>
+                <div>
+                  <h2>Record a crop photo</h2>
+                  <p>Capture a visual milestone from your field.</p>
+                </div>
+              </div>
+              <label className="upload-button">
+                {capturedImage ? 'Choose another photo' : 'Take or choose photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) setCapturedImage(URL.createObjectURL(file));
+                  }}
+                />
+              </label>
+              {capturedImage && <img src={capturedImage} alt="Selected crop" className="crop-preview" />}
+            </section>
+          </section>
+        )}
       </main>
 
-      {/* Bottom Navigation Bar (Mobile Thumb-Friendly) */}
-      <nav className="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md mx-auto flex justify-around p-3 z-50 shadow-lg">
-        <button 
-          onClick={() => setActiveTab('dashboard')} 
-          className={`flex flex-col items-center text-xs font-medium ${activeTab === 'dashboard' ? 'text-emerald-600' : 'text-slate-400'}`}
-        >
-          <Bell className="w-5 h-5 mb-1" /> Dashboard
-        </button>
-        <button 
-          onClick={() => setActiveTab('setup')} 
-          className={`flex flex-col items-center text-xs font-medium ${activeTab === 'setup' ? 'text-emerald-600' : 'text-slate-400'}`}
-        >
-          <MapPin className="w-5 h-5 mb-1" /> Farm Map
-        </button>
-        <button 
-          onClick={() => setActiveTab('camera')} 
-          className={`flex flex-col items-center text-xs font-medium ${activeTab === 'camera' ? 'text-emerald-600' : 'text-slate-400'}`}
-        >
-          <Camera className="w-5 h-5 mb-1" /> Snap Photo
-        </button>
-      </nav>
-
+      {activeRoute !== 'login' && (
+        <BottomNavigation activeRoute={activeRoute} navigate={navigate} />
+      )}
     </div>
   );
 }
