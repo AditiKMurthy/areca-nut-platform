@@ -76,6 +76,22 @@
   white-space: nowrap;
 }
 
+.sign-out-button {
+  padding: 0.35rem 0.55rem;
+  color: #087c4b;
+  background: #edf7ef;
+  border: 0;
+  border-radius: 0.45rem;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sign-out-button:hover {
+  background: #dff0e4;
+}
+
 .status-dot {
   width: 0.48rem;
   height: 0.48rem;
@@ -950,6 +966,11 @@
   box-shadow: 0 0.3rem 0.8rem rgb(25 55 42 / 9%);
 }
 
+.google-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .google-button:active {
   background: #f3f7f4;
 }
@@ -966,6 +987,13 @@
   font-size: 0.7rem;
   line-height: 1.45;
   text-align: center;
+}
+
+.login-error {
+  margin: 1rem 0 0;
+  color: #a74b46;
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .bottom-navigation {

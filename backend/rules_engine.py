@@ -35,7 +35,7 @@ def generate_advisory(stage: str, weather: dict, soil: dict):
     elif soil_ph < 5.5:
         alert = f"SOIL ALERT: Low soil pH detected ({soil_ph}). Apply agricultural lime (dolomite) to correct acidity and improve nutrient uptake."
     else:
-        alert = f"Normal operational window. Soil pH is optimal ({soil_ph}) and vegetative vigor index from Sentinel-2 tracking is stable."
+        alert = f"Normal operational window. Soil pH is within the expected range ({soil_ph}). Continue routine crop health monitoring."
 
     return {
         "stage": stage,

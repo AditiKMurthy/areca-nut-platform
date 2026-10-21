@@ -35,6 +35,7 @@ const routePaths = {
   setup: '/farm-setup',
   dashboard: '/dashboard',
 };
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 function getRoute(pathname) {
   return Object.keys(routePaths).find((route) => routePaths[route] === pathname) ?? 'login';
@@ -106,6 +107,12 @@ export default function App() {
   const [locating, setLocating] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
   const [backendStatus, setBackendStatus] = useState('Checking...');
+  const [authStatus, setAuthStatus] = useState('checking');
+  const [googleSignInEnabled, setGoogleSignInEnabled] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginError, setLoginError] = useState(
+    () => new URLSearchParams(window.location.search).get('auth_error') ?? '',
+  );
   const [feedbacks, setFeedbacks] = useState([]);
   const [environmentalMetrics, setEnvironmentalMetrics] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -129,10 +136,47 @@ export default function App() {
   }, [activeRoute]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/health')
-      .then((response) => response.json())
+    fetch(`${API_BASE_URL}/api/health`)
+      .then((response) => {
+        if (!response.ok) throw new Error('Backend health check failed.');
+        return response.json();
+      })
       .then((data) => setBackendStatus(data.status))
-      .catch(() => setBackendStatus('Offline (Mock Mode active)'));
+      .catch(() => setBackendStatus('Offline'));
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetch(`${API_BASE_URL}/api/auth/me`, { credentials: 'include' })
+      .then((response) => {
+        if (!response.ok) throw new Error('Could not check sign-in status.');
+        return response.json();
+      })
+      .then((data) => {
+        if (!isMounted) return;
+        setAuthStatus('ready');
+        setGoogleSignInEnabled(data.google_sign_in_enabled);
+        setIsAuthenticated(data.authenticated);
+
+        const currentRoute = getRoute(window.location.pathname);
+        const callbackHasError = new URLSearchParams(window.location.search).has('auth_error');
+        if (data.auth_required && !data.authenticated && currentRoute !== 'login') {
+          window.history.replaceState({}, '', routePaths.login);
+          setActiveRoute('login');
+        } else if (data.authenticated && currentRoute === 'login' && !callbackHasError) {
+          window.history.replaceState({}, '', routePaths.dashboard);
+          setActiveRoute('dashboard');
+        }
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        console.error('Could not check authentication configuration:', error);
+        setAuthStatus('unavailable');
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -145,8 +189,9 @@ export default function App() {
       setSummaryError('');
 
       try {
-        const response = await fetch('http://localhost:8000/api/analyze', {
+        const response = await fetch(`${API_BASE_URL}/api/analyze`, {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             latitude: position[0],
@@ -206,8 +251,9 @@ export default function App() {
   const handleRunAnalysis = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/analyze', {
+      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           latitude: position[0],
@@ -237,6 +283,35 @@ export default function App() {
       alert(error.message || 'Could not reach FastAPI backend. Make sure uvicorn is running on port 8000.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = () => {
+    if (authStatus === 'unavailable') {
+      setLoginError('The sign-in service is unavailable. Confirm the backend is running and try again.');
+      return;
+    }
+    if (!googleSignInEnabled) {
+      setLoginError('Google sign-in is not configured. Add your Google OAuth values to backend/.env.');
+      return;
+    }
+
+    window.location.assign(`${API_BASE_URL}/api/auth/google`);
+  };
+
+  const handleSignOut = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error('Could not sign out.');
+      setIsAuthenticated(false);
+      setActiveRoute('login');
+      window.history.pushState({}, '', routePaths.login);
+    } catch (error) {
+      console.error('Sign out failed:', error);
+      setLoginError('Could not sign out. Please try again.');
     }
   };
 
@@ -314,6 +389,11 @@ export default function App() {
           <div className="connection-status">
             <span className="status-dot" />
             <span className="status-label">{backendStatus}</span>
+            {isAuthenticated && (
+              <button type="button" className="sign-out-button" onClick={handleSignOut}>
+                Sign out
+              </button>
+            )}
           </div>
         </header>
       )}
@@ -333,7 +413,8 @@ export default function App() {
             <button
               type="button"
               className="google-button"
-              onClick={() => navigate('setup')}
+              onClick={handleGoogleLogin}
+              disabled={authStatus === 'checking'}
             >
               <svg className="google-icon" viewBox="0 0 48 48" aria-hidden="true">
                 <path fill="#4285F4" d="M43.6 24.5c0-1.6-.14-3.14-.4-4.64H24v8.77h11c-.48 2.6-1.94 4.8-4.13 6.27l6.68 5.18c3.9-3.6 6.05-8.9 6.05-15.58Z" />
@@ -341,9 +422,13 @@ export default function App() {
                 <path fill="#FBBC05" d="M12.41 27.24a12.1 12.1 0 0 1 0-6.48l-6.9-5.32a20.2 20.2 0 0 0 0 17.12l6.9-5.32Z" />
                 <path fill="#EA4335" d="M24 8.22c3.04 0 5.77 1.05 7.92 3.1l5.94-5.94C34.26 2.02 29.57 0 24 0 15.9 0 8.9 4.7 5.51 11.56l6.9 5.32C14.04 11.86 18.61 8.22 24 8.22Z" transform="translate(0 2)" />
               </svg>
-              Continue with Google
+              {authStatus === 'checking' ? 'Connecting…' : 'Continue with Google'}
             </button>
-            <p className="prototype-note">Google authentication is not connected in this demo.</p>
+            <p className={loginError ? 'login-error' : 'prototype-note'} role={loginError ? 'alert' : undefined}>
+              {loginError || (googleSignInEnabled
+                ? 'Your Google account is used only to sign you in.'
+                : 'Google sign-in needs OAuth credentials in backend/.env.')}
+            </p>
           </section>
         )}
 
@@ -455,7 +540,13 @@ export default function App() {
                 </div>
                 <span className={`live-indicator ${summaryLoading ? 'is-loading' : ''}`}>
                   <span />
-                  {summaryLoading ? 'Updating' : environmentalMetrics ? 'Live' : 'Unavailable'}
+                  {summaryLoading
+                    ? 'Updating'
+                    : environmentalMetrics?.weather_source === 'live'
+                      ? 'Live'
+                      : environmentalMetrics
+                        ? 'Estimated'
+                        : 'Unavailable'}
                 </span>
               </div>
               <div className="conditions-grid">
