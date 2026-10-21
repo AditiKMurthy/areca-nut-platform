@@ -13,24 +13,6 @@
     />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#047857" />
-    <script>
-      // Automatically clear old broken service workers for existing users on load
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker
-          .getRegistrations()
-          .then(function (registrations) {
-            for (let registration of registrations) {
-              // If there's an update or we need to clear stale caches, unregister
-              registration.unregister().then(function (boolean) {
-                if (boolean) {
-                  console.log("Stale service worker cleared, reloading...");
-                  window.location.reload();
-                }
-              });
-            }
-          });
-      }
-    </script>
     <title>frontend</title>
   </head>
   <body>
