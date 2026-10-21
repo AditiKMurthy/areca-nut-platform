@@ -1,4 +1,5 @@
-const CACHE_NAME = 'arecasmart-cache-v1';
+const CACHE_NAME = 'arecasmart-cache-v2';
+const CACHE_PREFIX = 'arecasmart-cache-';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -13,6 +14,17 @@ self.addEventListener('install', (event) => {
     })
   );
   self.skipWaiting();
+});
+
+// Activate the new worker immediately and remove outdated app caches.
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => Promise.all(
+      cacheNames
+        .filter((cacheName) => cacheName.startsWith(CACHE_PREFIX) && cacheName !== CACHE_NAME)
+        .map((cacheName) => caches.delete(cacheName)),
+    )).then(() => self.clients.claim()),
+  );
 });
 
 // Fetch event: serve cached content when offline
