@@ -8,7 +8,8 @@ import requests
 from starlette.requests import Request
 
 import main
-from services import fetch_weather_data
+import services
+from services import fetch_soil_data, fetch_weather_data
 
 
 def request_with_session(session: dict) -> Request:
@@ -31,6 +32,141 @@ def request_with_session(session: dict) -> Request:
 
 
 class FarmApiTests(unittest.TestCase):
+    def test_soil_data_uses_nearby_cache_then_refreshes_after_recovery(self) -> None:
+        first_response = Mock()
+        first_response.json.return_value = {
+            "properties": {
+                "layers": [
+                    {"name": "phh2o", "depths": [{"values": {"mean": 62}}]},
+                    {"name": "clay", "depths": [{"values": {"mean": 250}}]},
+                ]
+            }
+        }
+        refreshed_response = Mock()
+        refreshed_response.json.return_value = {
+            "properties": {
+                "layers": [
+                    {"name": "phh2o", "depths": [{"values": {"mean": 58}}]},
+                    {"name": "clay", "depths": [{"values": {"mean": 310}}]},
+                ]
+            }
+        }
+
+        with (
+            patch.object(services, "_soil_cache", None),
+            patch(
+                "services.requests.get",
+                side_effect=[
+                    first_response,
+                    requests.Timeout,
+                    refreshed_response,
+                    requests.Timeout,
+                ],
+            ) as get_soil,
+        ):
+            first = fetch_soil_data(13.3, 75.7)
+            with self.assertLogs("services", level="WARNING"):
+                cached = fetch_soil_data(13.3001, 75.7)
+            refreshed = fetch_soil_data(13.3, 75.7)
+            with self.assertLogs("services", level="WARNING"):
+                refreshed_cache = fetch_soil_data(13.3, 75.7)
+
+        self.assertEqual(first, {"ph": 6.2, "clay_content": 25.0, "source": "live"})
+        self.assertEqual(cached["source"], "cached")
+        self.assertEqual(cached["ph"], first["ph"])
+        self.assertEqual(cached["clay_content"], first["clay_content"])
+        self.assertGreaterEqual(cached["cache_age_seconds"], 0)
+        self.assertTrue(cached["cached_at"].endswith("+00:00"))
+        self.assertEqual(refreshed, {"ph": 5.8, "clay_content": 31.0, "source": "live"})
+        self.assertEqual(refreshed_cache["source"], "cached")
+        self.assertEqual(refreshed_cache["ph"], refreshed["ph"])
+        self.assertEqual(get_soil.call_count, 4)
+
+    def test_soil_data_uses_fixed_fallback_when_cache_is_not_nearby(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "properties": {
+                "layers": [
+                    {"name": "phh2o", "depths": [{"values": {"mean": 62}}]},
+                    {"name": "clay", "depths": [{"values": {"mean": 250}}]},
+                ]
+            }
+        }
+
+        with (
+            patch.object(services, "_soil_cache", None),
+            patch(
+                "services.requests.get",
+                side_effect=[response, requests.Timeout],
+            ),
+        ):
+            fetch_soil_data(13.3, 75.7)
+            with self.assertLogs("services", level="WARNING"):
+                soil = fetch_soil_data(13.4, 75.7)
+
+        self.assertEqual(
+            soil,
+            {"ph": 6.0, "clay_content": 28.0, "source": "fallback"},
+        )
+
+    def test_analysis_includes_cached_soil_age_and_timestamp(self) -> None:
+        weather = {
+            "temperature": 27.5,
+            "humidity": 72,
+            "current_precipitation": 0,
+            "forecast_rain_sum": 3.5,
+            "source": "live",
+        }
+        soil = {
+            "ph": 6.2,
+            "clay_content": 25.0,
+            "source": "cached",
+            "cached_at": "2026-10-21T10:00:00+00:00",
+            "cache_age_seconds": 3600.0,
+        }
+        submission = main.FarmSubmission(
+            latitude=13.3,
+            longitude=75.7,
+            growth_stage="Juvenile Palm",
+        )
+
+        with (
+            patch.object(main, "fetch_weather_data", return_value=weather),
+            patch.object(main, "fetch_soil_data", return_value=soil),
+        ):
+            result = main.analyze_farm(submission)
+
+        metrics = result["data"]["environmental_metrics"]
+        self.assertEqual(metrics["soil_source"], "cached")
+        self.assertEqual(metrics["soil_cached_at"], soil["cached_at"])
+        self.assertEqual(metrics["soil_cache_age_seconds"], soil["cache_age_seconds"])
+
+    def test_analysis_marks_refreshed_soil_data_as_live(self) -> None:
+        weather = {
+            "temperature": 27.5,
+            "humidity": 72,
+            "current_precipitation": 0,
+            "forecast_rain_sum": 3.5,
+            "source": "live",
+        }
+        soil = {"ph": 5.8, "clay_content": 31.0, "source": "live"}
+        submission = main.FarmSubmission(
+            latitude=13.3,
+            longitude=75.7,
+            growth_stage="Juvenile Palm",
+        )
+
+        with (
+            patch.object(main, "fetch_weather_data", return_value=weather),
+            patch.object(main, "fetch_soil_data", return_value=soil),
+        ):
+            result = main.analyze_farm(submission)
+
+        metrics = result["data"]["environmental_metrics"]
+        self.assertEqual(metrics["soil_source"], "live")
+        self.assertNotIn("soil_cached_at", metrics)
+        self.assertNotIn("soil_cache_age_seconds", metrics)
+
     def test_health_and_auth_status_are_available_without_oauth_credentials(self) -> None:
         health = main.health_check()
         auth = main.current_user(request_with_session({}))

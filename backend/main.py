@@ -240,6 +240,9 @@ def analyze_farm(
         environmental_metrics = advisory["environmental_metrics"]
         environmental_metrics["weather_source"] = weather["source"]
         environmental_metrics["soil_source"] = soil["source"]
+        if soil["source"] == "cached":
+            environmental_metrics["soil_cached_at"] = soil["cached_at"]
+            environmental_metrics["soil_cache_age_seconds"] = soil["cache_age_seconds"]
 
         return {"success": True, "data": advisory}
     except (KeyError, TypeError, ValueError):
